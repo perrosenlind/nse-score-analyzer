@@ -22,12 +22,14 @@ This tool helps in extracting and visualizing exam details from Fortinet NSE cer
 ## Requirements
 
 - Python 3.6+
+- Tesseract OCR engine installed on your system
 - Required libraries:
   - PyMuPDF (fitz)
   - PIL (Pillow)
   - numpy
   - opencv-python (cv2)
   - rich
+  - pytesseract
   - argparse
 
 ## Installation
@@ -53,6 +55,21 @@ This tool helps in extracting and visualizing exam details from Fortinet NSE cer
    ```
    pip install -r requirements.txt
    ```
+
+4. Install Tesseract OCR:
+   
+   On macOS (using Homebrew):
+   ```
+   brew install tesseract
+   ```
+   
+   On Ubuntu/Debian:
+   ```
+   sudo apt-get install tesseract-ocr
+   ```
+   
+   On Windows:
+   Download and install from https://github.com/UB-Mannheim/tesseract/wiki
 
 ## Usage
 

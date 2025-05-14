@@ -1,5 +1,5 @@
 import fitz  # PyMuPDF
-from PIL import Image
+from PIL import Image, ImageEnhance
 import numpy as np
 import cv2
 import io
@@ -8,6 +8,7 @@ from rich.progress import BarColumn
 from rich.table import Table
 from rich.text import Text
 import argparse
+import pytesseract
 
 def extract_images_from_pdf(pdf_path):
     import os
@@ -118,8 +119,7 @@ def extract_bar_percentages(pdf_path, num_bars):
     # Threshold
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     # Save debug threshold image
-    from PIL import Image as PILImage
-    PILImage.fromarray(thresh).save("debug_bar_area.png")
+    Image.fromarray(thresh).save("debug_bar_area.png")
     # Find contours
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bars = []
@@ -231,8 +231,6 @@ def extract_bar_fill_percentages_from_rendered(image, num_bars):
     return percentages
 
 def mark_bar_filling_on_image(image, num_bars=5):
-    import cv2
-    import numpy as np
     img_np = np.array(image.convert('RGB'))
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     h, w = gray.shape
