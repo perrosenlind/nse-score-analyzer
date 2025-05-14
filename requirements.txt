@@ -1,0 +1,5 @@
+PyMuPDF>=1.18.0
+Pillow>=8.0.0
+numpy>=1.19.0
+opencv-python>=4.5.0
+rich>=10.0.0
