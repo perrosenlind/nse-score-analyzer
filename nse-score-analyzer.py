@@ -4,17 +4,20 @@ import numpy as np
 import cv2
 import io
 from rich.console import Console
-from rich.progress import BarColumn
 from rich.table import Table
 from rich.text import Text
 import argparse
 import pytesseract
+import os
+import sys
+
 
 def extract_images_from_pdf(pdf_path):
-    import os
+    """Extract images from PDF file."""
     doc = fitz.open(pdf_path)
     images = []
-    for page_num, page in enumerate(doc, 1):
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
         for img_idx, img in enumerate(page.get_images(full=True)):
             xref = img[0]
             base_image = doc.extract_image(xref)
@@ -22,12 +25,15 @@ def extract_images_from_pdf(pdf_path):
             pil_img = Image.open(io.BytesIO(image_bytes))
             images.append(pil_img)
             # Save for inspection
-            out_path = f"extracted_image_page{page_num}_{img_idx}.png"
+            out_path = f"extracted_image_page{page_num + 1}_{img_idx}.png"
             pil_img.save(out_path)
             print(f"Saved {out_path} size={pil_img.size}")
+    doc.close()
     return images
 
+
 def extract_labels(image, num_labels=5):
+    """Extract labels from image using OCR."""
     # Crop a wider left side
     left_crop = image.crop((0, 0, int(image.width * 0.65), image.height))
     # Save for debugging
@@ -44,19 +50,26 @@ def extract_labels(image, num_labels=5):
         print(line)
     return lines[:num_labels]
 
+
 def extract_text_rows(pdf_path):
+    """Extract text rows from PDF."""
     doc = fitz.open(pdf_path)
-    for page_num, page in enumerate(doc, 1):
-        text = page.get_text()
-        print(f"--- Page {page_num} ---")
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        text = page.get_text() # type: ignore
+        print(f"--- Page {page_num + 1} ---")
         print(text)
+    doc.close()
+
 
 def extract_exam_info_and_topics(pdf_path):
+    """Extract exam information and topics from PDF."""
     doc = fitz.open(pdf_path)
     exam_name = candidate_name = grade = date = None
     topics = []
-    for page_num, page in enumerate(doc, 1):
-        text = page.get_text()
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        text = page.get_text() # type: ignore
         lines = text.splitlines()
 
         # Exam name (row after "XAMINATION SUMMARY REPORT")
@@ -91,15 +104,18 @@ def extract_exam_info_and_topics(pdf_path):
 
         # Extract topics
         if start is not None and end is not None:
-            topics = [l.strip() for l in lines[start:end] if l.strip()]
+            topics = [line.strip() for line in lines[start:end] if line.strip()]
         else:
             print("DEBUG: Could not find topic markers. Printing all lines for inspection:")
             for idx, line in enumerate(lines):
                 print(f"{idx}: {line}")
         break  # Only process first page
+    doc.close()
     return exam_name, candidate_name, grade, date, topics
 
+
 def extract_bar_percentages(pdf_path, num_bars):
+    """Extract bar percentages from PDF images."""
     doc = fitz.open(pdf_path)
     images = []
     for page in doc:
@@ -108,14 +124,16 @@ def extract_bar_percentages(pdf_path, num_bars):
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
             images.append(Image.open(io.BytesIO(image_bytes)))
+    doc.close()
+    
     if not images:
         return []
     # Assume first image is the bar chart
     image = images[0].convert('L')
     img_np = np.array(image)
-    h, w = img_np.shape
+    height, width = img_np.shape
     # Skip the top 60% of the image
-    bar_area = img_np[int(h*0.9):, :]
+    bar_area = img_np[int(height*0.9):, :]
     # Threshold
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     # Save debug threshold image
@@ -133,7 +151,7 @@ def extract_bar_percentages(pdf_path, num_bars):
     # Debug: draw rectangles
     debug_img = cv2.cvtColor(bar_area, cv2.COLOR_GRAY2BGR)
     for x, y, w, h in bars:
-        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0,255,0), 2)
+        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
     cv2.imwrite("debug_bars_detected.png", debug_img)
     # Sort bars top-to-bottom
     bars = sorted(bars, key=lambda b: b[1])
@@ -142,11 +160,13 @@ def extract_bar_percentages(pdf_path, num_bars):
     percentages = [round((w / max_width) * 100, 2) for (_, _, w, _) in bars]
     return percentages
 
+
 def extract_bar_percentages_from_image(image, num_bars):
+    """Extract bar percentages from image."""
     img_np = np.array(image.convert('L'))
     # Crop to the likely bar area (adjust as needed)
-    h, w = img_np.shape
-    bar_area = img_np[int(h*0.35):int(h*0.95), int(w*0.45):]
+    height, width = img_np.shape
+    bar_area = img_np[int(height*0.35):int(height*0.95), int(width*0.45):]
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bars = []
@@ -157,7 +177,7 @@ def extract_bar_percentages_from_image(image, num_bars):
     # Debug: draw rectangles
     debug_img = cv2.cvtColor(bar_area, cv2.COLOR_GRAY2BGR)
     for x, y, w, h in bars:
-        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0,255,0), 2)
+        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
     cv2.imwrite("debug_bars_detected.png", debug_img)
     # Sort and get percentages
     bars = sorted(bars, key=lambda b: b[1])
@@ -166,19 +186,24 @@ def extract_bar_percentages_from_image(image, num_bars):
     percentages = [round((w / max_width) * 100, 2) for (_, _, w, _) in bars]
     return percentages
 
+
 def render_page_as_image(pdf_path, page_num=0, zoom=2):
+    """Render PDF page as image."""
     doc = fitz.open(pdf_path)
     page = doc.load_page(page_num)
     mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat)
+    pix = page.get_pixmap(matrix=mat) # type: ignore
     img = Image.open(io.BytesIO(pix.tobytes()))
+    doc.close()
     return img
 
+
 def extract_bar_percentages_from_rendered(image, num_bars):
+    """Extract bar percentages from rendered image."""
     img_np = np.array(image.convert('L'))
-    h, w = img_np.shape
+    height, width = img_np.shape
     # Skip the top 60% (adjust as needed)
-    bar_area = img_np[int(h*0.6):, :]
+    bar_area = img_np[int(height*0.6):, :]
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     # Save debug threshold image
     Image.fromarray(thresh).save("debug_bar_area.png")
@@ -191,7 +216,7 @@ def extract_bar_percentages_from_rendered(image, num_bars):
     # Debug: draw rectangles
     debug_img = cv2.cvtColor(bar_area, cv2.COLOR_GRAY2BGR)
     for x, y, w, h in bars:
-        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0,255,0), 2)
+        cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 255, 0), 2)
     cv2.imwrite("debug_bars_detected.png", debug_img)
     bars = sorted(bars, key=lambda b: b[1])
     bars = bars[:num_bars]
@@ -199,11 +224,13 @@ def extract_bar_percentages_from_rendered(image, num_bars):
     percentages = [round((w / max_width) * 100, 2) for (_, _, w, _) in bars]
     return percentages
 
+
 def extract_bar_fill_percentages_from_rendered(image, num_bars):
+    """Extract bar fill percentages from rendered image."""
     img_np = np.array(image.convert('L'))
-    h, w = img_np.shape
+    height, width = img_np.shape
     # Skip the top 60% (adjust as needed)
-    bar_area = img_np[int(h*0.6):, :]
+    bar_area = img_np[int(height*0.6):, :]
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bars = []
@@ -230,13 +257,14 @@ def extract_bar_fill_percentages_from_rendered(image, num_bars):
         percentages.append(round(percent, 2))
     return percentages
 
+
 def mark_bar_filling_on_image(image, num_bars=5):
+    """Mark bar filling on image and return percentages."""
     img_np = np.array(image.convert('RGB'))
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    h, w = gray.shape
-    crop_top = int(h * 0.4)  # Was 0.6, now 0.4 to include more at the top
+    height, width = gray.shape
+    crop_top = int(height * 0.4)  # Was 0.6, now 0.4 to include more at the top
     bar_area = gray[crop_top:, :]
-    color_bar_area = img_np[crop_top:, :].copy()
     _, thresh = cv2.threshold(bar_area, 200, 255, cv2.THRESH_BINARY_INV)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     bars = []
@@ -261,7 +289,9 @@ def mark_bar_filling_on_image(image, num_bars=5):
         percentages.append(percent)
     return percentages
 
-if __name__ == "__main__":
+
+def main():
+    """Main function to analyze PDF score report."""
     parser = argparse.ArgumentParser(description="Analyze a score report PDF.")
     parser.add_argument(
         "-f", "--file",
@@ -271,6 +301,34 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     pdf_path = args.file
+
+    # Check if PDF file exists
+    if not os.path.exists(pdf_path):
+        console = Console()
+        error_text = Text(f"❌ Error: PDF file '{pdf_path}' not found!", style="bold red")
+        console.print(error_text)
+        console.print("Please check that the file path is correct and the file exists.")
+        console.print(f"Current working directory: {os.getcwd()}")
+        console.print("Use -f or --file to specify a different PDF file path.")
+        sys.exit(1)
+
+    # Check if file is actually a PDF
+    if not pdf_path.lower().endswith('.pdf'):
+        console = Console()
+        warning_text = Text(f"⚠️  Warning: '{pdf_path}' does not appear to be a PDF file!", style="bold yellow")
+        console.print(warning_text)
+
+    # Try to open the PDF file
+    try:
+        test_doc = fitz.open(pdf_path)
+        test_doc.close()
+    except Exception as e:
+        console = Console()
+        error_text = Text(f"❌ Error: Cannot open PDF file '{pdf_path}'", style="bold red")
+        console.print(error_text)
+        console.print(f"Error details: {str(e)}")
+        console.print("Please ensure the file is a valid PDF and not corrupted.")
+        sys.exit(1)
 
     exam_name, candidate_name, grade, date, topics = extract_exam_info_and_topics(pdf_path)
     print("\nExam Name:", exam_name)
@@ -318,3 +376,7 @@ if __name__ == "__main__":
             table.add_row(topic, percent_str, bar_text)
 
         console.print(table)
+
+
+if __name__ == "__main__":
+    main()
